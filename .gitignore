@@ -1,0 +1,12 @@
+# MyTest.py
+# MyTrain_best_iterative_pvt_antiartifact_laplace.py
+# models/*
+
+dataset/*
+log/*
+pre_trained/*
+.idea/* 
+exp_result/
+Ranking_whole/
+models/__pycache__/
+__pycache__/

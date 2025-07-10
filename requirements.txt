@@ -1,0 +1,12 @@
+numpy
+opencv-python
+Pillow
+prettytable
+scikit-learn
+scipy
+six
+tensorboardX
+timm
+tqdm
+imageio
+scikit-image
