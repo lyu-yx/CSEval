@@ -130,13 +130,15 @@ class CamObjDataset(data.Dataset):
 
     def prepare_segmentation_label(self, mask, gt):
         semantic_label = torch.zeros_like(mask, dtype=torch.long)
-        semantic_label[mask == 1] = gt
+        # Convert float score to integer class (0-10 range)
+        gt_class = int(round(gt))
+        semantic_label[mask == 1] = gt_class
         return semantic_label
 
     def load_gt(self, gt_path):
         with open(gt_path, 'r') as f:
             gt = f.read().strip()
-        return int(gt)
+        return float(gt)
 
     def filter_files(self):
         assert len(self.images) == len(self.masks) and len(self.masks) == len(self.images)
@@ -218,7 +220,9 @@ class test_dataset(data.Dataset):
 
     def prepare_segmentation_label(self, mask, gt):
         semantic_label = torch.zeros_like(mask, dtype=torch.long)
-        semantic_label[mask == 1] = gt
+        # Convert float score to integer class (0-10 range)
+        gt_class = int(round(gt))
+        semantic_label[mask == 1] = gt_class
         return semantic_label
 
     def __len__(self):
@@ -227,7 +231,7 @@ class test_dataset(data.Dataset):
     def load_gt(self, gt_path):
         with open(gt_path, 'r') as f:
             gt = f.read().strip()
-        return int(gt)
+        return float(gt)
 
     def rgb_loader(self, path):
         with open(path, 'rb') as f:
