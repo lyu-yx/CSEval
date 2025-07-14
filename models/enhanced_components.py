@@ -5,13 +5,19 @@ import numpy as np
 
 class UnsupervisedSemanticDiscovery(nn.Module):
     """Discover semantic parts without labels using clustering in feature space"""
-    def __init__(self, in_channels=128, num_semantic_parts=6):
+    def __init__(self, in_channels=128, num_semantic_parts=6, alpha_proto=0.5):
         super().__init__()
         self.num_parts = num_semantic_parts
-        
+        self.proto_weight = alpha_proto
+        self.conv_weight = 1 - alpha_proto
+
         # Part discovery through learnable prototypes
         self.part_prototypes = nn.Parameter(torch.randn(num_semantic_parts, in_channels))
         self.part_attention = nn.Conv2d(in_channels, num_semantic_parts, 1)
+        
+        # Learnable weight for combining conv and prototype features
+        self.combine_weight = nn.Parameter(torch.tensor([self.proto_weight, self.conv_weight]))  # [conv_weight, proto_weight]
+        
         self.part_refine = nn.Sequential(
             nn.Conv2d(in_channels + num_semantic_parts, in_channels, 3, padding=1),
             nn.BatchNorm2d(in_channels),
@@ -28,8 +34,30 @@ class UnsupervisedSemanticDiscovery(nn.Module):
     def forward(self, features, mask):
         B, C, H, W = features.shape
         
-        # Compute part attention maps
-        part_logits = self.part_attention(features)  # [B, num_parts, H, W]
+        # Method 1: Convolution-based part attention
+        conv_logits = self.part_attention(features)  # [B, num_parts, H, W]
+        
+        # Method 2: Prototype-based similarity
+        features_flat = features.view(B, C, -1)  # [B, C, H*W]
+        prototypes = self.part_prototypes  # [num_parts, C]
+        
+        # Normalize features and prototypes for cosine similarity
+        features_norm = F.normalize(features_flat, dim=1)  # [B, C, H*W]
+        prototypes_norm = F.normalize(prototypes, dim=1)   # [num_parts, C]
+        
+        # 计算每个样本与所有原型的相似度
+        # [B, num_parts, H*W] = [B, C, H*W] 与 [num_parts, C] 做矩阵乘法
+        proto_logits = torch.einsum('bch,nc->bnh', features_norm, prototypes_norm)  # [B, num_parts, H*W]
+        proto_logits = proto_logits.view(B, self.num_parts, H, W)
+        
+        # Combine two methods with learnable weights
+        combine_weights = F.softmax(self.combine_weight, dim=0)
+        conv_weight, proto_weight = combine_weights[0], combine_weights[1]
+        
+        # Weighted combination
+        part_logits = conv_weight * conv_logits + proto_weight * proto_logits
+        
+        # Apply softmax to get attention maps
         part_attention = F.softmax(part_logits, dim=1)
         
         # Apply mask to focus only on object regions
@@ -275,6 +303,9 @@ class StreamlinedLoss(nn.Module):
         # 5. Semantic consistency loss (smooth part transitions)
         if self.alpha_semantic > 0 and part_attention is not None:
             # Encourage smooth transitions between semantic parts
+            # L_vertical = (1/(B×P×H×W)) × Σ ||A[b,p,h,w] - A[b,p,h+1,w]||²
+            # L_horizontal = (1/(B×P×H×W)) × Σ ||A[b,p,h,w] - A[b,p,h,w+1]||²
+            # L_semantic = L_vertical + L_horizontal
             part_smoothness = 0
             if part_attention.size(2) > 1:
                 part_smoothness += F.mse_loss(part_attention[:, :, :-1, :], 
