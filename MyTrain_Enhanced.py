@@ -72,10 +72,6 @@ def get_domain_label(gt_value):
     # COD typically ranges 0-5, SOD typically ranges 5-10
     return 0 if gt_value <= 5 else 1  # 0 for COD, 1 for SOD
 
-def classification_loss(pred, gt):
-    """Cross entropy loss for classification"""
-    return F.cross_entropy(pred, gt)
-
 def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
     global step
     model.train()
@@ -98,11 +94,13 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
 
             images = images.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
-            gts = gts.cuda(non_blocking=True)
+            gts = gts.cuda(non_blocking=True).float()
+
             seg_label = seg_label.cuda(non_blocking=True)
             
             # Generate domain labels based on ground truth values
             domain_labels = torch.tensor([get_domain_label(gt.item()) for gt in gts]).cuda()
+
 
             with torch.cuda.amp.autocast():
                 # Enhanced model is default - use enhanced forward pass
@@ -110,7 +108,7 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
                     outputs = model.forward_enhanced(images, mask, training_mode=True)
                     
                     # Enhanced loss computation
-                    loss, loss_dict = criterion(outputs, gts-1, images, mask, domain_labels)
+                    loss, loss_dict = criterion(outputs, gts, images, mask, domain_labels)
                     
                     # Track individual loss components
                     for key in loss_components:
@@ -118,10 +116,11 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
                         
                 else:
                     # Fallback for models without enhanced features
-                    sem, preds, fixation = model(images, mask)
-                    outputs = {'pred': sem, 'target_pred': preds, 'fixation': fixation,
+                    outputs = model(images, mask)
+
+                    outputs = {'pred': outputs['pred'], 'target_pred': outputs['target_pred'], 'fixation': outputs['fixation'],
                               'pvt_features': None, 'part_attention': None, 'domain_logits': None}
-                    loss, loss_dict = criterion(outputs, gts-1, images, mask, domain_labels)
+                    loss, loss_dict = criterion(outputs, gts, images, mask, domain_labels)
 
             scaler.scale(loss).backward()
             
@@ -168,17 +167,15 @@ def val(test_loader, model, epoch, save_path, writer):
     global best_metric_dict, best_score, best_epoch
 
     if epoch == 1:
-        best_metric_dict = {'ACC': 0.0}
+        best_metric_dict = {'MAE': 0.0}
 
-    ACC = Measure.Accuracy()
+    #ACC = Measure.Accuracy()
     metrics_dict = dict()
     model.eval()
 
     # Enhanced save directories
-    save_dir_sem = 'log/result_sem'
     save_dir_fix = 'log/result_fix'
     save_dir_parts = 'log/result_parts'
-    os.makedirs(save_dir_sem, exist_ok=True)
     os.makedirs(save_dir_fix, exist_ok=True)
     os.makedirs(save_dir_parts, exist_ok=True)
 
@@ -190,7 +187,7 @@ def val(test_loader, model, epoch, save_path, writer):
             image = image.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             gt = gt.cuda(non_blocking=True)
-            seg_label = seg_label.cuda(non_blocking=True)
+            #seg_label = seg_label.cuda(non_blocking=True)
 
             # Enhanced forward pass if available
             if hasattr(model, 'forward_enhanced'):
@@ -208,55 +205,41 @@ def val(test_loader, model, epoch, save_path, writer):
                 part_attention = None
 
             # Process semantic predictions
-            sem = F.softmax(sem, dim=1)
-            sem = sem.argmax(dim=1) + 1
-            fg_mask = (mask.squeeze(1) > 0).long()
-            sem = sem * fg_mask.float()
 
             fix = fix.squeeze(1)
 
             # Save results and part attention if available
-            for b in range(sem.shape[0]):
-                sem_pred = sem[b].cpu().numpy()
-                sem_gt = seg_label[b].cpu().numpy()
+            for b in range(res.shape[0]):
+                res_pred = res[b].cpu().numpy()
+                res_gt = gt[b].cpu().numpy()
                 fix_pred = fix[b].cpu().numpy()
                 mask_np = mask[b].squeeze().cpu().numpy()
                 img_name = os.path.splitext(names[b])[0]
 
-                total_mae += compute_mae(sem_pred, sem_gt)
+                total_mae += compute_mae(res_pred, res_gt)
                 count += 1
 
-                save_semantic_gray(sem_pred, img_name, save_dir_sem)
                 save_fixation_gray(fix_pred, mask_np, img_name, save_dir_fix)
-                
+                '''
                 # Save semantic part attention if available
                 if part_attention is not None:
                     part_att_np = part_attention[b].cpu().numpy()
                     save_part_attention(part_att_np, mask_np, img_name, save_dir_parts)
-
-            # Classification accuracy
-            res = F.softmax(res, dim=1)
-            pred_labels = res.argmax(dim=1) + 1
-
-            try:
-                ACC.step(pred=pred_labels, gt=gt)
-            except Exception as e:
-                print(f"Error at sample {i}: {e}")
+                '''
 
         MAE = total_mae / count if count > 0 else 0.0
-        metrics_dict.update(ACC=ACC.get_results()['accuracy'])
+        metrics_dict.update(MAE=MAE)
 
-        cur_score = metrics_dict['ACC']
-        writer.add_scalar('ACC', cur_score, global_step=epoch)
-        writer.add_scalar('rMAE', MAE, global_step=epoch)
+        cur_score = metrics_dict['MAE']
+        writer.add_scalar('MAE', MAE, global_step=epoch)
 
         # Enhanced logging
         if epoch == 1:
             best_score = cur_score
-            print(f'[Cur Epoch: {epoch}] Metrics (ACC={metrics_dict["ACC"]:.4f}, rMAE={MAE:.4f})')
-            logging.info(f'[Cur Epoch: {epoch}] Metrics (ACC={metrics_dict["ACC"]:.4f}, rMAE={MAE:.4f})')
+            print(f'[Cur Epoch: {epoch}] Metrics (MAE={MAE:.4f})')
+            logging.info(f'[Cur Epoch: {epoch}] Metrics (MAE={metrics_dict["MAE"]:.4f})')
         else:
-            if cur_score > best_score:
+            if cur_score < best_score:
                 best_metric_dict = metrics_dict
                 best_score = cur_score
                 best_epoch = epoch
@@ -265,17 +248,17 @@ def val(test_loader, model, epoch, save_path, writer):
             else:
                 print('>>> No improvement, continue training...')
                 
-            print(f'[Current Epoch {epoch}] ACC={metrics_dict["ACC"]:.4f}, rMAE={MAE:.4f}')
-            print(f'[Best Epoch {best_epoch}] ACC={best_metric_dict["ACC"]:.4f}')
-            logging.info(f'[Current Epoch {epoch}] ACC={metrics_dict["ACC"]:.4f}, rMAE={MAE:.4f}')
-            logging.info(f'[Best Epoch {best_epoch}] ACC={best_metric_dict["ACC"]:.4f}')
+            print(f'[Current Epoch {epoch}] MAE={metrics_dict["MAE"]:.4f}')
+            print(f'[Best Epoch {best_epoch}] MAE={best_metric_dict["MAE"]:.4f}')
+            logging.info(f'[Current Epoch {epoch}] MAE={metrics_dict["MAE"]:.4f}')
+            logging.info(f'[Best Epoch {best_epoch}] MAE={best_metric_dict["MAE"]:.4f}')
 
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=200, help='epoch number')
-    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
+    parser.add_argument('--lr', type=float, default=1e-5, help='learning rate')
     parser.add_argument('--batchsize', type=int, default=8, help='training batch size')
     parser.add_argument('--trainsize', type=int, default=352, help='training dataset size')
     parser.add_argument('--clip', type=float, default=0.5, help='gradient clipping margin')
@@ -287,7 +270,7 @@ if __name__ == '__main__':
                         help='the training rgb images root')
     parser.add_argument('--val_root', type=str, default='./dataset/TestDataset/COD10K/',
                         help='the test rgb images root')
-    parser.add_argument('--gpu_id', type=str, default='0', help='train use gpu')
+    parser.add_argument('--gpu_id', type=str, default='1', help='train use gpu')
     parser.add_argument('--save_path', type=str, default='./log/MyTrain_Enhanced/',
                         help='the path to save model and log')
     

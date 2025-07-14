@@ -73,15 +73,15 @@ def organize_projected_scores():
         if (idx + 1) % 5000 == 0:
             print(f"Processed {idx + 1}/{len(df)} entries...")
     
-    print(f"\n✅ Successfully organized projected scores:")
-    print(f"   Training files: {train_count} → {train_ranking_dir}")
-    print(f"   Testing files:  {test_count} → {test_ranking_dir}")
+    print(f"\n Successfully organized projected scores:")
+    print(f"   Training files: {train_count}  {train_ranking_dir}")
+    print(f"   Testing files:  {test_count}  {test_ranking_dir}")
     print(f"   Total processed: {train_count + test_count}")
     
     # Verify some files were created
     if train_count > 0:
         sample_train_files = list(train_ranking_dir.glob("*.txt"))[:3]
-        print(f"\n📁 Sample training files created:")
+        print(f"\n Sample training files created:")
         for f in sample_train_files:
             with open(f, 'r') as file:
                 content = file.read().strip()
@@ -89,7 +89,7 @@ def organize_projected_scores():
     
     if test_count > 0:
         sample_test_files = list(test_ranking_dir.glob("*.txt"))[:3]
-        print(f"\n📁 Sample testing files created:")
+        print(f"\n Sample testing files created:")
         for f in sample_test_files:
             with open(f, 'r') as file:
                 content = file.read().strip()
@@ -97,7 +97,7 @@ def organize_projected_scores():
 
 def verify_organization():
     """Verify the organization was successful"""
-    print("\n🔍 Verification:")
+    print("\n Verification:")
     
     # Check directories exist
     train_dir = Path("dataset/TrainDataset/Ranking_proj")
@@ -105,32 +105,32 @@ def verify_organization():
     
     if train_dir.exists():
         train_files = list(train_dir.glob("*.txt"))
-        print(f"   ✅ Training Ranking_proj: {len(train_files)} files")
+        print(f"    Training Ranking_proj: {len(train_files)} files")
     else:
-        print(f"   ❌ Training Ranking_proj directory not found")
+        print(f"    Training Ranking_proj directory not found")
     
     if test_dir.exists():
         test_files = list(test_dir.glob("*.txt"))
-        print(f"   ✅ Testing Ranking_proj: {len(test_files)} files")
+        print(f"    Testing Ranking_proj: {len(test_files)} files")
     else:
-        print(f"   ❌ Testing Ranking_proj directory not found")
+        print(f"    Testing Ranking_proj directory not found")
     
     # Compare with original CSV
     try:
         df = pd.read_csv("Ranking_whole/gt_continuous.csv")
         total_csv_entries = len(df)
         total_created_files = len(train_files) + len(test_files) if train_dir.exists() and test_dir.exists() else 0
-        print(f"   📊 CSV entries: {total_csv_entries}, Created files: {total_created_files}")
+        print(f"   CSV entries: {total_csv_entries}, Created files: {total_created_files}")
         
         if total_csv_entries == total_created_files:
-            print(f"   ✅ Perfect match! All entries organized successfully.")
+            print(f"   Perfect match! All entries organized successfully.")
         else:
-            print(f"   ⚠️  Mismatch detected. Please check for errors.")
+            print(f"     Mismatch detected. Please check for errors.")
     except:
-        print(f"   ⚠️  Could not verify against original CSV")
+        print(f"     Could not verify against original CSV")
 
 if __name__ == "__main__":
-    print("🎯 Organizing Projected Scores into Ranking_proj Folders")
+    print("Organizing Projected Scores into Ranking_proj Folders")
     print("=" * 60)
     
     # Change to script directory
@@ -142,4 +142,4 @@ if __name__ == "__main__":
     # Verify the results
     verify_organization()
     
-    print("\n🎉 Organization complete!") 
+    print("\n Organization complete!")

@@ -247,7 +247,7 @@ def get_test_loader(image_root, mask_root, gt_root, batchsize, testsize, num_wor
     dataset = test_dataset(image_root, mask_root, gt_root, testsize)
     data_loader = data.DataLoader(dataset=dataset,
                                   batch_size=batchsize,
-                                  shuffle=False,  # 不需要打乱
+                                  shuffle=False,  
                                   num_workers=num_workers,
                                   pin_memory=pin_memory)
     return data_loader

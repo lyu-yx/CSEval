@@ -96,23 +96,23 @@ class DomainAdapter(nn.Module):
         super().__init__()
         # Small adapter networks for domain-specific adjustments
         self.cod_adapter = nn.Sequential(
-            nn.Conv2d(channels, adapter_dim, 1),
+            nn.Conv2d(channels*4, adapter_dim, 1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(adapter_dim, channels, 1),
+            nn.Conv2d(adapter_dim, channels*4, 1),
             nn.Sigmoid()  # Multiplicative adaptation
         )
         
         self.sod_adapter = nn.Sequential(
-            nn.Conv2d(channels, adapter_dim, 1),
+            nn.Conv2d(channels*4, adapter_dim, 1),
             nn.ReLU(inplace=True), 
-            nn.Conv2d(adapter_dim, channels, 1),
+            nn.Conv2d(adapter_dim, channels*4, 1),
             nn.Sigmoid()  # Multiplicative adaptation
         )
         
         # Domain detection (for training only, not used in inference)
         self.domain_detector = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, 32, 1),
+            nn.Conv2d(channels*4, 32, 1),
             nn.ReLU(inplace=True),
             nn.Conv2d(32, 2, 1),  # COD vs SOD
             nn.Flatten()
@@ -140,32 +140,33 @@ class DomainAdapter(nn.Module):
             
         return adapted_features, domain_logits
 
+
 class ContrastLoss(nn.Module):
-    """Measure local contrast around object boundaries"""
     def __init__(self):
         super().__init__()
-        # Sobel operators for edge detection
         sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32)
         sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32)
         self.register_buffer('sobel_x', sobel_x.view(1, 1, 3, 3))
         self.register_buffer('sobel_y', sobel_y.view(1, 1, 3, 3))
-        
+
     def forward(self, image, mask):
-        # Convert to grayscale
+        image = image.float()  # [B, 3, H, W]
+        mask = mask.float()    # [B, 1, H, W]
+
         gray = 0.299 * image[:, 0] + 0.587 * image[:, 1] + 0.114 * image[:, 2]
-        gray = gray.unsqueeze(1)
-        
-        # Compute gradients
-        grad_x = F.conv2d(gray, self.sobel_x, padding=1)
-        grad_y = F.conv2d(gray, self.sobel_y, padding=1)
+        gray = gray.unsqueeze(1)  # [B, 1, H, W]
+
+        sobel_x = self.sobel_x.to(dtype=gray.dtype, device=gray.device)
+        sobel_y = self.sobel_y.to(dtype=gray.dtype, device=gray.device)
+
+        grad_x = F.conv2d(gray, sobel_x, padding=1)
+        grad_y = F.conv2d(gray, sobel_y, padding=1)
         gradient_magnitude = torch.sqrt(grad_x**2 + grad_y**2 + 1e-8)
-        
-        # Focus on object boundary regions
+
         boundary_mask = F.conv2d(mask, torch.ones(1, 1, 3, 3).to(mask.device), padding=1)
-        boundary_mask = (boundary_mask > 0) & (boundary_mask < 9)  # Boundary detection
-        
-        # Compute contrast in boundary regions
-        boundary_contrast = gradient_magnitude * boundary_mask.float()
+        boundary_mask = ((boundary_mask > 0) & (boundary_mask < 9)).float()
+
+        boundary_contrast = gradient_magnitude * boundary_mask
         return boundary_contrast.mean()
 
 class PVTPerceptualLoss(nn.Module):
@@ -231,11 +232,12 @@ class StreamlinedLoss(nn.Module):
             part_attention = model_outputs.get('part_attention', None)
             domain_logits = model_outputs.get('domain_logits', None)
         else:
-            # Original format: (pred, target_pred, fixation)
-            pred, target_pred, fixation = model_outputs
-            pvt_features = None
-            part_attention = None
-            domain_logits = None
+            pred = model_outputs['pred']
+            target_pred = model_outputs['target_pred']
+            fixation = model_outputs['fixation']
+            pvt_features = model_outputs.get('pvt_features', None)
+            part_attention = model_outputs.get('part_attention', None)
+            domain_logits = model_outputs.get('domain_logits', None)
         
         total_loss = 0
         loss_dict = {}
@@ -284,5 +286,5 @@ class StreamlinedLoss(nn.Module):
             loss_dict['semantic_loss'] = part_smoothness.item()
         else:
             loss_dict['semantic_loss'] = 0
-            
-        return total_loss, loss_dict 
+
+        return total_loss, loss_dict

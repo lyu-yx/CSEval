@@ -48,6 +48,7 @@ class EnhancedDegreeNet(nn.Module):
         fb1, fb2, fb3, fb4 = pvt_features
         
         # Apply domain adaptation to the highest level features
+
         fb4_adapted, domain_logits = self.domain_adapter(fb4, training_mode)
         
         # Process through enhanced decoder

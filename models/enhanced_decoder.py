@@ -40,18 +40,16 @@ class EnhancedDecoder(nn.Module):
         self.MSA2 = MSA_module(dim=channels)
         
         # Output layers
-        self.output_conv1 = nn.Conv2d(channels, 10, 1)
+        self.output_conv1 = nn.Conv2d(channels, 1, 1)
         
         # Enhanced semantic-aware fixation prediction
         self.semantic_fixation_conv = nn.Sequential(
             nn.Conv2d(channels, channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
             nn.Conv2d(channels, channels//2, 3, padding=1, bias=False),
             nn.BatchNorm2d(channels//2),
             nn.ReLU(inplace=True),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
             nn.Conv2d(channels//2, 1, 1),
             nn.Sigmoid()
         )
@@ -122,14 +120,16 @@ class EnhancedDecoder(nn.Module):
         
         # Generate prediction
         pred = self.output_conv1(D1)
+
         
         # Compute target prediction with semantic-aware fixation weighting
-        mask_expanded = mask.expand(-1, 10, -1, -1)
-        fixation_expanded = fixation.expand(-1, 10, -1, -1)
+        #mask_expanded = mask.expand(-1, 10, -1, -1)
+        #fixation_expanded = fixation.expand(-1, 10, -1, -1)
         
-        masked_logits = pred * mask_expanded * fixation_expanded
-        masked_sum = masked_logits.sum(dim=[2, 3])
-        fixation_area = (mask_expanded * fixation_expanded).sum(dim=[2, 3]).clamp(min=1e-6)
+        masked_pred = pred * mask * fixation
+        masked_sum = masked_pred.sum(dim=[2, 3])
+        fixation_area = (mask * fixation).sum(dim=[2, 3]).clamp(min=1e-6)
         target_pred = masked_sum / fixation_area
+        target_pred = target_pred.squeeze(dim=1)  
         
         return pred, target_pred, fixation, part_attention 
