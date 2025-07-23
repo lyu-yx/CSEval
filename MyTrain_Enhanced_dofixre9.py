@@ -271,7 +271,7 @@ if __name__ == '__main__':
     parser.add_argument('--load', type=str, default=None, help='train from checkpoints')
     parser.add_argument('--train_root', type=str, default='./dataset/TrainDataset/',
                         help='the training rgb images root')
-    parser.add_argument('--val_root', type=str, default='./dataset/TestDataset/COD10K/',
+    parser.add_argument('--val_root', type=str, default='./dataset/TestDataset/',
                         help='the test rgb images root')
     parser.add_argument('--gpu_id', type=str, default='0', help='train use gpu')
     parser.add_argument('--save_path', type=str, default='./log/MyTrain_Enhanced_dofixre9_gemini/',
