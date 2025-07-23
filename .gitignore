@@ -10,3 +10,5 @@ exp_result/
 Ranking_whole/
 models/__pycache__/
 __pycache__/
+old_files/*
+models/old/*

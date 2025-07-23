@@ -3,6 +3,7 @@ import os
 import logging
 import numpy as np
 import sys
+
 sys.path.append('')
 from datetime import datetime
 from tensorboardX import SummaryWriter
@@ -18,8 +19,8 @@ from PIL import Image
 import eval.metrics as Measure
 
 # Enhanced models and components
-from models.CamoEval_enhanced import EnhancedDegreeNet as Network
-from models.enhanced_components import StreamlinedLoss
+from models.CamoEval_enhanced_dofixre3 import EnhancedDegreeNet as Network
+from models.enhanced_components_dofixre import StreamlinedLoss
 from models.utils import clip_gradient
 from models.dataset_sem import get_loader, test_dataset, get_test_loader
 
@@ -29,36 +30,34 @@ sem_gray_map = {
     6: 153, 7: 175, 8: 204, 9: 225, 10: 255
 }
 
+
 def compute_mae(pred, gt):
     return np.mean(np.abs(pred.astype(np.float32) - gt.astype(np.float32)))
 
-def save_semantic_gray(sem_pred, name, save_dir):
-    gray = np.zeros_like(sem_pred, dtype=np.uint8)
-    for k, v in sem_gray_map.items():
-        gray[sem_pred == k] = v
-    os.makedirs(save_dir, exist_ok=True)
-    Image.fromarray(gray).save(os.path.join(save_dir, f"{name}.png"))
+
+
 
 def save_fixation_gray(fix_pred, mask, name, save_dir):
     """Save fixation map with enhanced semantic visualization"""
     mask = (mask > 0).astype(np.float32)
     masked_fixation = fix_pred * mask
-    
+
     if masked_fixation[mask > 0].size > 0:
         min_val = masked_fixation[mask > 0].min()
         max_val = masked_fixation[mask > 0].max()
         if max_val > min_val:
             masked_fixation[mask > 0] = (masked_fixation[mask > 0] - min_val) / (max_val - min_val)
-    
+
     vis_img = (masked_fixation * 255).astype(np.uint8)
     os.makedirs(save_dir, exist_ok=True)
     Image.fromarray(vis_img).save(os.path.join(save_dir, f"{name}.png"))
+
 
 def save_part_attention(part_attention, mask, name, save_dir):
     """Save semantic part attention maps"""
     os.makedirs(save_dir, exist_ok=True)
     mask = (mask > 0).astype(np.float32)
-    
+
     # Save each semantic part as a separate image
     for part_idx in range(part_attention.shape[0]):
         part_map = part_attention[part_idx] * mask
@@ -67,10 +66,12 @@ def save_part_attention(part_attention, mask, name, save_dir):
         part_img = (part_map * 255).astype(np.uint8)
         Image.fromarray(part_img).save(os.path.join(save_dir, f"{name}_part_{part_idx}.png"))
 
+
 def get_domain_label(gt_value):
     """Determine domain label based on ground truth value"""
     # COD typically ranges 0-5, SOD typically ranges 5-10
     return 0 if gt_value <= 5 else 1  # 0 for COD, 1 for SOD
+
 
 def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
     global step
@@ -78,14 +79,14 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
     model.cuda()
     loss_all = 0
     epoch_step = 0
-    
+
     # Enhanced loss tracking
     loss_components = {
-        'main_loss': 0, 'perceptual_loss': 0, 
-        'domain_loss': 0, 'semantic_loss': 0
+        'main_loss': 0, 'perceptual_loss': 0,
+        'domain_loss': 0
     }
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler('cuda')
     torch.cuda.empty_cache()
 
     try:
@@ -97,37 +98,37 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
             gts = gts.cuda(non_blocking=True).float()
 
             seg_label = seg_label.cuda(non_blocking=True)
-            
+
             # Generate domain labels based on ground truth values
             domain_labels = torch.tensor([get_domain_label(gt.item()) for gt in gts]).cuda()
 
-
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 # Enhanced model is default - use enhanced forward pass
                 if hasattr(model, 'forward_enhanced'):
                     outputs = model.forward_enhanced(images, mask, training_mode=True)
-                    
+
                     # Enhanced loss computation
                     loss, loss_dict = criterion(outputs, gts, images, mask, domain_labels)
-                    
+
                     # Track individual loss components
                     for key in loss_components:
                         loss_components[key] += loss_dict.get(key, 0)
-                        
+
                 else:
                     # Fallback for models without enhanced features
                     outputs = model(images, mask)
 
-                    outputs = {'pred': outputs['pred'], 'target_pred': outputs['target_pred'], 'fixation': outputs['fixation'],
-                              'pvt_features': None, 'part_attention': None, 'domain_logits': None}
+                    outputs = {'pred': outputs['pred'], 'target_pred': outputs['target_pred'],
+                               'fixation': outputs['fixation'],
+                               'pvt_features': None, 'part_attention': None, 'domain_logits': None}
                     loss, loss_dict = criterion(outputs, gts, images, mask, domain_labels)
 
             scaler.scale(loss).backward()
-            
+
             # Gradient clipping for stability
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
+
             scaler.step(optimizer)
             scaler.update()
 
@@ -139,14 +140,15 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
                 print(f'{datetime.now()} Epoch [{epoch:03d}/{opt.epoch:03d}], '
                       f'Step [{i:04d}/{total_step}], Loss: {loss.item():.4f}')
                 # Enhanced features are default - always show detailed loss breakdown
-                print(f'  Main: {loss_dict["main_loss"]:.4f}, Perceptual: {loss_dict["perceptual_loss"]:.4f}, Domain: {loss_dict["domain_loss"]:.4f}, Semantic: {loss_dict["semantic_loss"]:.4f}')
-                
+                print(
+                    f'  Main: {loss_dict["main_loss"]:.4f}, Perceptual: {loss_dict["perceptual_loss"]:.4f}, Domain: {loss_dict["domain_loss"]:.4f}')
+
                 logging.info(f'[Train] Epoch [{epoch:03d}/{opt.epoch:03d}], '
                              f'Step [{i:04d}/{total_step}], Loss: {loss.item():.4f}')
 
         loss_all /= epoch_step
         logging.info(f'[Train] Epoch [{epoch:03d}/{opt.epoch:03d}], Avg Loss: {loss_all:.4f}')
-        
+
         # Log enhanced metrics (always available with Enhanced Degree Model)
         writer.add_scalar('Loss-epoch', loss_all, global_step=epoch)
         for key, value in loss_components.items():
@@ -161,6 +163,7 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
         torch.save(model.state_dict(), os.path.join(save_path, f'Net_epoch_last.pth'))
         raise
 
+
 def val(test_loader, model, epoch, save_path, writer):
     """Enhanced validation with semantic part visualization"""
     global best_metric_dict, best_score, best_epoch
@@ -168,7 +171,7 @@ def val(test_loader, model, epoch, save_path, writer):
     if epoch == 1:
         best_metric_dict = {'MAE': 0.0}
 
-    #ACC = Measure.Accuracy()
+    # ACC = Measure.Accuracy()
     metrics_dict = dict()
     model.eval()
 
@@ -186,7 +189,7 @@ def val(test_loader, model, epoch, save_path, writer):
             image = image.cuda(non_blocking=True)
             mask = mask.cuda(non_blocking=True)
             gt = gt.cuda(non_blocking=True)
-            #seg_label = seg_label.cuda(non_blocking=True)
+            # seg_label = seg_label.cuda(non_blocking=True)
 
             # Enhanced forward pass if available
             if hasattr(model, 'forward_enhanced'):
@@ -246,11 +249,12 @@ def val(test_loader, model, epoch, save_path, writer):
                 print(f'>>> Saved best model at epoch {epoch}')
             else:
                 print('>>> No improvement, continue training...')
-                
+
             print(f'[Current Epoch {epoch}] MAE={metrics_dict["MAE"]:.4f}')
             print(f'[Best Epoch {best_epoch}] MAE={best_metric_dict["MAE"]:.4f}')
             logging.info(f'[Current Epoch {epoch}] MAE={metrics_dict["MAE"]:.4f}')
             logging.info(f'[Best Epoch {best_epoch}] MAE={best_metric_dict["MAE"]:.4f}')
+
 
 if __name__ == '__main__':
     import argparse
@@ -258,7 +262,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=200, help='epoch number')
     parser.add_argument('--lr', type=float, default=1e-5, help='learning rate')
-    parser.add_argument('--batchsize', type=int, default=8, help='training batch size')
+    parser.add_argument('--batchsize', type=int, default=24, help='training batch size')
     parser.add_argument('--trainsize', type=int, default=352, help='training dataset size')
     parser.add_argument('--clip', type=float, default=0.5, help='gradient clipping margin')
     parser.add_argument('--decay_rate', type=float, default=0.1, help='decay rate of learning rate')
@@ -269,16 +273,16 @@ if __name__ == '__main__':
                         help='the training rgb images root')
     parser.add_argument('--val_root', type=str, default='./dataset/TestDataset/COD10K/',
                         help='the test rgb images root')
-    parser.add_argument('--gpu_id', type=str, default='1', help='train use gpu')
-    parser.add_argument('--save_path', type=str, default='./log/MyTrain_Enhanced_prototype/',
+    parser.add_argument('--gpu_id', type=str, default='0', help='train use gpu')
+    parser.add_argument('--save_path', type=str, default='./log/MyTrain_Enhanced_dofixre3/',
                         help='the path to save model and log')
-    
+
     # Enhanced loss parameters (enhanced features are default)
     parser.add_argument('--alpha_perceptual', type=float, default=1, help='perceptual loss weight')
-    parser.add_argument('--alpha_domain', type=float, default=50, help='domain loss weight')#ori:0.1
-    parser.add_argument('--alpha_semantic', type=float, default=10, help='semantic loss weight')#ori:0.1
-    parser.add_argument('--disable_enhanced', action='store_true', help='disable enhanced features (fallback to basic model)')
-    
+    parser.add_argument('--alpha_domain', type=float, default=50, help='domain loss weight')  # ori:0.1
+    parser.add_argument('--disable_enhanced', action='store_true',
+                        help='disable enhanced features (fallback to basic model)')
+
     opt = parser.parse_args()
 
     # Set device
@@ -303,18 +307,16 @@ if __name__ == '__main__':
         model = Network(channel=64)
         criterion = StreamlinedLoss(
             alpha_perceptual=0.0,  # Disable all enhanced losses
-            alpha_domain=0.0,
-            alpha_semantic=0.0
+            alpha_domain=0.0
         )
     else:
         print("Using Enhanced Degree Model with Semantic Discovery and Domain Adaptation (Default)")
         model = Network(channel=128)  # Enhanced features by default
         criterion = StreamlinedLoss(
             alpha_perceptual=opt.alpha_perceptual,
-            alpha_domain=opt.alpha_domain,
-            alpha_semantic=opt.alpha_semantic
+            alpha_domain=opt.alpha_domain
         )
-    
+
     if opt.load is not None:
         model.load_state_dict(torch.load(opt.load))
         print('load model from ', opt.load)
@@ -359,15 +361,15 @@ if __name__ == '__main__':
 
     # Enhanced learning rate scheduler
     cosine_schedule = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=20, eta_min=1e-5)
-    
+
     print(">>> start training with Enhanced Degree Model...")
     for epoch in range(1, opt.epoch):
         cosine_schedule.step()
         writer.add_scalar('learning_rate', cosine_schedule.get_lr()[0], global_step=epoch)
         logging.info('>>> current lr: {}'.format(cosine_schedule.get_lr()[0]))
-        
+
         # Train with enhanced model (always available now)
         train(train_loader, model, optimizer, epoch, save_path, writer, criterion)
-            
+
         if epoch > 0:
-            val(val_loader, model, epoch, save_path, writer) 
+            val(val_loader, model, epoch, save_path, writer)
