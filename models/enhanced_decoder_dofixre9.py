@@ -46,9 +46,9 @@ class EnhancedDecoder(nn.Module):
         self.rf_side_conv3 = nn.Conv2d(128, channels, 3, padding=1)
 
         # Feature fusion modules moved inside the decoder
-        self.fusion_fb4 = FeatureFusion(512)
-        self.fusion_fb3 = FeatureFusion(320)
-        self.fusion_fb2 = FeatureFusion(128)
+        self.fusion_fb4 = FeatureFusion(channels)
+        self.fusion_fb3 = FeatureFusion(channels)
+        self.fusion_fb2 = FeatureFusion(channels)
 
         self.adaptive_rf_module = AdaptiveReceptiveFieldModule(channels)
 
