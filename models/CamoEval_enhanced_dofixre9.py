@@ -40,6 +40,11 @@ class EnhancedDegreeNet(nn.Module):
         self.ln_fb2 = nn.LayerNorm([channel, 88, 88])  # adjust as needed
         # Enhanced decoder
         self.decoder = EnhancedDecoder(channel)
+        # Projections to ensure all ARFM inputs have 'channel' channels
+        self.proj_fb4 = nn.Conv2d(512, channel, 1)
+        self.proj_fb3 = nn.Conv2d(320, channel, 1)
+        self.proj_fb2 = nn.Conv2d(128, channel, 1)
+        self.proj_fb1 = nn.Conv2d(64, channel, 1)
 
     def forward(self, x, mask):
         # Enhanced model by default, return original format for compatibility
@@ -61,39 +66,44 @@ class EnhancedDegreeNet(nn.Module):
             fb4.detach(), fb3.detach(), fb2.detach(), training_mode
         )
 
+        # Project all features to 'channel' channels
+        fb4_proj = self.proj_fb4(fb4_adapted.detach())
+        fb3_proj = self.proj_fb3(fb3_adapted.detach())
+        fb2_proj = self.proj_fb2(fb2_adapted.detach())
+        fb1_proj = self.proj_fb1(fb1.detach())
+
         # --- Ensure all ARFM inputs have the same spatial size ---
-        # For fb4_arfm, upsample fb3_adapted and fb2_adapted to fb4_adapted's size
-        target_size_fb4 = fb4_adapted.shape[2:]
-        fb3_adapted_up4 = F.interpolate(fb3_adapted.detach(), size=target_size_fb4, mode='bilinear', align_corners=False)
-        fb2_adapted_up4 = F.interpolate(fb2_adapted.detach(), size=target_size_fb4, mode='bilinear', align_corners=False)
-        fb4_arfm = self.arfm(fb4_adapted.detach(), fb3_adapted_up4, fb2_adapted_up4)
+        # For fb4_arfm, upsample fb3_proj and fb2_proj to fb4_proj's size
+        target_size_fb4 = fb4_proj.shape[2:]
+        fb3_proj_up4 = F.interpolate(fb3_proj, size=target_size_fb4, mode='bilinear', align_corners=False)
+        fb2_proj_up4 = F.interpolate(fb2_proj, size=target_size_fb4, mode='bilinear', align_corners=False)
+        fb4_arfm = self.arfm(fb4_proj, fb3_proj_up4, fb2_proj_up4)
 
-        # For fb3_arfm, upsample fb2_adapted and fb1 to fb3_adapted's size
-        target_size_fb3 = fb3_adapted.shape[2:]
-        fb2_adapted_up3 = F.interpolate(fb2_adapted.detach(), size=target_size_fb3, mode='bilinear', align_corners=False)
-        fb1_up3 = F.interpolate(fb1.detach(), size=target_size_fb3, mode='bilinear', align_corners=False)
-        fb3_arfm = self.arfm(fb3_adapted.detach(), fb2_adapted_up3, fb1_up3)
+        # For fb3_arfm, upsample fb2_proj and fb1_proj to fb3_proj's size
+        target_size_fb3 = fb3_proj.shape[2:]
+        fb2_proj_up3 = F.interpolate(fb2_proj, size=target_size_fb3, mode='bilinear', align_corners=False)
+        fb1_proj_up3 = F.interpolate(fb1_proj, size=target_size_fb3, mode='bilinear', align_corners=False)
+        fb3_arfm = self.arfm(fb3_proj, fb2_proj_up3, fb1_proj_up3)
 
-        # For fb2_arfm, upsample fb1 twice to fb2_adapted's size
-        target_size_fb2 = fb2_adapted.shape[2:]
-        fb1_up2a = F.interpolate(fb1.detach(), size=target_size_fb2, mode='bilinear', align_corners=False)
-        fb1_up2b = F.interpolate(fb1.detach(), size=target_size_fb2, mode='bilinear', align_corners=False)
-        fb2_arfm = self.arfm(fb2_adapted.detach(), fb1_up2a, fb1_up2b)
+        # For fb2_arfm, upsample fb1_proj twice to fb2_proj's size
+        target_size_fb2 = fb2_proj.shape[2:]
+        fb1_proj_up2a = F.interpolate(fb1_proj, size=target_size_fb2, mode='bilinear', align_corners=False)
+        fb1_proj_up2b = F.interpolate(fb1_proj, size=target_size_fb2, mode='bilinear', align_corners=False)
+        fb2_arfm = self.arfm(fb2_proj, fb1_proj_up2a, fb1_proj_up2b)
 
         # Gated fusion of adapted and ARFM features
         alpha = torch.sigmoid(self.gate_param)
-        # Use dynamic LayerNorm based on feature size
         def norm_fused(feat, fused):
             shape = fused.shape
             ln = nn.LayerNorm(shape[1:], device=fused.device, dtype=fused.dtype)
             return ln(feat)
-        fb4_fused = norm_fused(alpha * fb4_adapted + (1 - alpha) * fb4_arfm, fb4_arfm)
-        fb3_fused = norm_fused(alpha * fb3_adapted + (1 - alpha) * fb3_arfm, fb3_arfm)
-        fb2_fused = norm_fused(alpha * fb2_adapted + (1 - alpha) * fb2_arfm, fb2_arfm)
+        fb4_fused = norm_fused(alpha * fb4_proj + (1 - alpha) * fb4_arfm, fb4_arfm)
+        fb3_fused = norm_fused(alpha * fb3_proj + (1 - alpha) * fb3_arfm, fb3_arfm)
+        fb2_fused = norm_fused(alpha * fb2_proj + (1 - alpha) * fb2_arfm, fb2_arfm)
 
-        # Pass fused features to decoder
+        # Pass original backbone features as originals, fused/projected as adapted
         pred, target_pred, fixation = self.decoder(
-            originals={'fb4': fb4_fused, 'fb3': fb3_fused, 'fb2': fb2_fused, 'fb1': fb1},
+            originals={'fb4': fb4, 'fb3': fb3, 'fb2': fb2, 'fb1': fb1},
             adapted={'fb4': fb4_fused, 'fb3': fb3_fused, 'fb2': fb2_fused},
             mask=mask
         )
