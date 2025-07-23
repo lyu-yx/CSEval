@@ -101,10 +101,10 @@ class EnhancedDegreeNet(nn.Module):
         fb3_fused = norm_fused(alpha * fb3_proj + (1 - alpha) * fb3_arfm, fb3_arfm)
         fb2_fused = norm_fused(alpha * fb2_proj + (1 - alpha) * fb2_arfm, fb2_arfm)
 
-        # Pass original backbone features as originals, fused/projected as adapted
+        # Pass original backbone features as originals, domain-adapted as adapted
         pred, target_pred, fixation = self.decoder(
             originals={'fb4': fb4, 'fb3': fb3, 'fb2': fb2, 'fb1': fb1},
-            adapted={'fb4': fb4_fused, 'fb3': fb3_fused, 'fb2': fb2_fused},
+            adapted={'fb4': fb4_adapted, 'fb3': fb3_adapted, 'fb2': fb2_adapted},
             mask=mask
         )
 

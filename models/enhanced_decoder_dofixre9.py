@@ -102,36 +102,43 @@ class EnhancedDecoder(nn.Module):
         fb4_orig, fb3_orig, fb2_orig, fb1_orig = originals['fb4'], originals['fb3'], originals['fb2'], originals['fb1']
         fb4_adapt, fb3_adapt, fb2_adapt = adapted['fb4'], adapted['fb3'], adapted['fb2']
 
-        # 2. Fuse them
-        # Lightweight alignment (GroupNorm) on adapted features before fusion
-        fb4_adapt = self.fusion_fb4.norm_adapt(fb4_adapt)
-        fb3_adapt = self.fusion_fb3.norm_adapt(fb3_adapt)
-        fb2_adapt = self.fusion_fb2.norm_adapt(fb2_adapt)
+        # 2. Channel adapt original features first to match target dimensions
+        E4_orig = self.side_conv1(fb4_orig)  # 512 -> channels
+        E3_orig = self.side_conv2(fb3_orig)  # 320 -> channels  
+        E2_orig = self.side_conv3(fb2_orig)  # 128 -> channels
+        E1_orig = self.side_conv4(fb1_orig)  # 64 -> channels
 
-        E4 = self.fusion_fb4(fb4_orig, fb4_adapt)
-        E3 = self.fusion_fb3(fb3_orig, fb3_adapt)
-        E2 = self.fusion_fb2(fb2_orig, fb2_adapt)
-        E1 = fb1_orig  # fb1 is not adapted, so no fusion
+        # 3. Channel adapt adapted features to match target dimensions
+        E4_adapt = self.rf_side_conv1(fb4_adapt)  # 512 -> channels
+        E3_adapt = self.rf_side_conv2(fb3_adapt)  # 320 -> channels
+        E2_adapt = self.rf_side_conv3(fb2_adapt)  # 128 -> channels
 
-        # 3. Perform channel adaptation ONCE on the fused features
-        E4_c = self.side_conv1(E4)
-        E3_c = self.side_conv2(E3)
-        E2_c = self.side_conv3(E2)
-        E1_c = self.side_conv4(E1)
+        # 4. Now fuse them (both inputs have same channel dimension)
+        E4 = self.fusion_fb4(E4_orig, E4_adapt)
+        E3 = self.fusion_fb3(E3_orig, E3_adapt) 
+        E2 = self.fusion_fb2(E2_orig, E2_adapt)
+        E1 = E1_orig  # fb1 is not adapted, so no fusion
 
-        # 4. Run Adaptive RF Module on ORIGINAL features (after channel adaptation)
-        fb4_orig_c = self.rf_side_conv1(fb4_orig)
-        fb3_orig_c = self.rf_side_conv2(fb3_orig)
-        fb2_orig_c = self.rf_side_conv3(fb2_orig)
+        # 5. Use the fused features directly (already channel-adapted)
+        E4_c = E4
+        E3_c = E3
+        E2_c = E2
+        E1_c = E1
 
+        # 6. Run Adaptive RF Module on already channel-adapted original features
         # Align sizes for adaptive RF module
-        if fb4_orig_c.size()[2:] != fb3_orig_c.size()[2:]:
-            fb4_orig_c = F.interpolate(fb4_orig_c, size=fb3_orig_c.size()[2:], mode='bilinear', align_corners=True)
-        if fb2_orig_c.size()[2:] != fb3_orig_c.size()[2:]:
-            fb2_orig_c = F.interpolate(fb2_orig_c, size=fb3_orig_c.size()[2:], mode='bilinear', align_corners=True)
+        if E4_orig.size()[2:] != E3_orig.size()[2:]:
+            E4_orig_aligned = F.interpolate(E4_orig, size=E3_orig.size()[2:], mode='bilinear', align_corners=True)
+        else:
+            E4_orig_aligned = E4_orig
+            
+        if E2_orig.size()[2:] != E3_orig.size()[2:]:
+            E2_orig_aligned = F.interpolate(E2_orig, size=E3_orig.size()[2:], mode='bilinear', align_corners=True)
+        else:
+            E2_orig_aligned = E2_orig
 
         # Enhanced context modeling with adaptive receptive fields on original features
-        E5 = self.adaptive_rf_module(fb4_orig_c, fb3_orig_c, fb2_orig_c)
+        E5 = self.adaptive_rf_module(E4_orig_aligned, E3_orig, E2_orig_aligned)
 
         # Use semantic features for further processing, resizing E5 to match each feature map
         E4_fused = torch.cat((E4_c, F.interpolate(E5, size=E4_c.size()[2:], mode='bilinear', align_corners=True)), 1)

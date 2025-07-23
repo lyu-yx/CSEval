@@ -102,7 +102,7 @@ def train(train_loader, model, optimizer, epoch, save_path, writer, criterion):
             # Generate domain labels based on ground truth values
             domain_labels = torch.tensor([get_domain_label(gt.item()) for gt in gts]).cuda()
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 # Enhanced model is default - use enhanced forward pass
                 if hasattr(model, 'forward_enhanced'):
                     outputs = model.forward_enhanced(images, mask, training_mode=True)
